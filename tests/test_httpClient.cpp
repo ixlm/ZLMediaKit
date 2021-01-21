@@ -1,27 +1,11 @@
-/*
- * MIT License
+﻿/*
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
  *
- * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
  */
 
 #include <signal.h>
@@ -59,11 +43,8 @@ int main(int argc, char *argv[]) {
     //下载器map
     map<string, HttpDownloader::Ptr> downloaderMap;
     //下载两个文件，一个是http下载，一个https下载
-    auto urlList = {"https://timgsa.baidu.com/timg?image&quality=80&"
-                    "size=b9999_10000&sec=1537717640404&"
-                    "di=f602efbebbc1e7f6b9ccb0bf0def89d0&"
-                    "imgtype=0&"
-                    "src=http%3A%2F%2Fimgsrc.baidu.com%2Fimgad%2Fpic%2Fitem%2F241f95cad1c8a786ff65052a6d09c93d70cf5042.jpg",};
+    auto urlList = {"http://www.baidu.com/img/baidu_resultlogo@2.png",
+                    "https://www.baidu.com/img/baidu_resultlogo@2.png"};
 
     for (auto &url : urlList) {
         //创建下载器

@@ -1,28 +1,12 @@
-/*
-* MIT License
-*
-* Copyright (c) 2016 xiongziliang <771730766@qq.com>
-*
-* This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
-*
-* Permission is hereby granted, free of charge, to any person obtaining a copy
-* of this software and associated documentation files (the "Software"), to deal
-* in the Software without restriction, including without limitation the rights
-* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-* copies of the Software, and to permit persons to whom the Software is
-* furnished to do so, subject to the following conditions:
-*
-* The above copyright notice and this permission notice shall be included in all
-* copies or substantial portions of the Software.
-*
-* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-* SOFTWARE.
-*/
+﻿/*
+ * Copyright (c) 2016 The ZLMediaKit project authors. All Rights Reserved.
+ *
+ * This file is part of ZLMediaKit(https://github.com/xia-chu/ZLMediaKit).
+ *
+ * Use of this source code is governed by MIT license that can be found in the
+ * LICENSE file in the root of the source tree. All contributing project authors
+ * may be found in the AUTHORS file in the root of the source tree.
+ */
 
 #include <algorithm>
 #include "MediaPusher.h"
@@ -35,34 +19,44 @@ namespace mediakit {
 MediaPusher::MediaPusher(const MediaSource::Ptr &src,
                          const EventPoller::Ptr &poller) {
     _src = src;
-    _poller = poller;
-    if(!_poller){
-        _poller = EventPollerPool::Instance().getPoller();
-    }
+    _poller = poller ? poller : EventPollerPool::Instance().getPoller();
 }
 
 MediaPusher::MediaPusher(const string &schema,
-                         const string &strVhost,
-                         const string &strApp,
-                         const string &strStream,
+                         const string &vhost,
+                         const string &app,
+                         const string &stream,
                          const EventPoller::Ptr &poller) :
-        MediaPusher(MediaSource::find(schema,strVhost,strApp,strStream),poller){
+        MediaPusher(MediaSource::find(schema, vhost, app, stream), poller){
 }
 
 MediaPusher::~MediaPusher() {
 }
-void MediaPusher::publish(const string &strUrl) {
-    _parser = PusherBase::createPusher(_poller,_src.lock(),strUrl);
-    _parser->setOnShutdown(_shutdownCB);
-    _parser->setOnPublished(_publishCB);
-    _parser->mINI::operator=(*this);
-    _parser->publish(strUrl);
+
+static void setOnCreateSocket_l(const std::shared_ptr<PusherBase> &delegate, const Socket::onCreateSocket &cb){
+    auto helper = dynamic_pointer_cast<SocketHelper>(delegate);
+    if (helper) {
+        helper->setOnCreateSocket(cb);
+    }
+}
+
+void MediaPusher::publish(const string &url) {
+    _delegate = PusherBase::createPusher(_poller, _src.lock(), url);
+    assert(_delegate);
+    setOnCreateSocket_l(_delegate, _on_create_socket);
+    _delegate->setOnShutdown(_shutdownCB);
+    _delegate->setOnPublished(_publishCB);
+    _delegate->mINI::operator=(*this);
+    _delegate->publish(url);
 }
 
 EventPoller::Ptr MediaPusher::getPoller(){
     return _poller;
 }
 
-
+void MediaPusher::setOnCreateSocket(Socket::onCreateSocket cb){
+    setOnCreateSocket_l(_delegate, cb);
+    _on_create_socket = std::move(cb);
+}
 
 } /* namespace mediakit */
