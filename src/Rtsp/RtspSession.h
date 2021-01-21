@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -29,6 +29,7 @@
 
 #include <set>
 #include <vector>
+#include <unordered_set>
 #include <unordered_map>
 #include "Util/util.h"
 #include "Util/logger.h"
@@ -108,6 +109,16 @@ protected:
 
 	//TcpSession override
     int send(const Buffer::Ptr &pkt) override;
+
+
+    /**
+     * 收到RTCP包回调
+     * @param iTrackidx
+     * @param track
+     * @param pucData
+     * @param uiLen
+     */
+    virtual void onRtcpPacket(int iTrackidx, SdpTrack::Ptr &track, unsigned char *pucData, unsigned int uiLen);
 private:
 	bool handleReq_Options(const Parser &parser); //处理options方法
     bool handleReq_Describe(const Parser &parser); //处理describe方法
@@ -133,7 +144,7 @@ private:
     inline int getTrackIndexByControlSuffix(const string &controlSuffix);
 	inline int getTrackIndexByInterleaved(int interleaved);
 
-	inline void onRcvPeerUdpData(int iTrackIdx, const Buffer::Ptr &pBuf, const struct sockaddr &addr);
+	inline void onRcvPeerUdpData(int intervaled, const Buffer::Ptr &pBuf, const struct sockaddr &addr);
 	inline void startListenPeerUdpData(int iTrackIdx);
 
     //认证相关
@@ -163,11 +174,9 @@ private:
 	vector<SdpTrack::Ptr> _aTrackInfo;
 
 	//RTP over udp
-	bool _bGotAllPeerUdp = false;
-	bool _abGotPeerUdp[2] = { false, false }; //获取客户端udp端口计数
 	Socket::Ptr _apRtpSock[2]; //RTP端口,trackid idx 为数组下标
 	Socket::Ptr _apRtcpSock[2];//RTCP端口,trackid idx 为数组下标
-
+    unordered_set<int> _udpSockConnected;
 	//RTP over udp_multicast
 	RtpBroadCaster::Ptr _pBrdcaster;
 
@@ -189,11 +198,9 @@ private:
     //rtsp推流相关
 	RtspToRtmpMediaSource::Ptr _pushSrc;
 
-#ifdef RTSP_SEND_RTCP
 	RtcpCounter _aRtcpCnt[2]; //rtcp统计,trackid idx 为数组下标
 	Ticker _aRtcpTicker[2]; //rtcp发送时间,trackid idx 为数组下标
-	inline void sendRTCP();
-#endif
+	inline void sendSenderReport(bool overTcp,int iTrackIndex);
 };
 
 /**

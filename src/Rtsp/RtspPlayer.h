@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -84,13 +84,23 @@ protected:
      * @param trackidx track索引
      */
 	void onRtpSorted(const RtpPacket::Ptr &rtppt, int trackidx) override;
+
+
+    /**
+     * 收到RTCP包回调
+     * @param iTrackidx
+     * @param track
+     * @param pucData
+     * @param uiLen
+     */
+    virtual void onRtcpPacket(int iTrackidx, SdpTrack::Ptr &track, unsigned char *pucData, unsigned int uiLen);
 private:
 	void onRecvRTP_l(const RtpPacket::Ptr &pRtppt, const SdpTrack::Ptr &track);
 	void onPlayResult_l(const SockException &ex);
 
     int getTrackIndexByControlSuffix(const string &controlSuffix) const;
     int getTrackIndexByInterleaved(int interleaved) const;
-	int getTrackIndexByTrackType(TrackType trackId) const;
+	int getTrackIndexByTrackType(TrackType trackType) const;
 
 	void play(const string &strUrl, const string &strUser, const string &strPwd,  Rtsp::eRtpType eType);
 	void onConnect(const SockException &err) override;
@@ -110,13 +120,16 @@ private:
 
     void sendRtspRequest(const string &cmd, const string &url ,const StrCaseMap &header = StrCaseMap());
 	void sendRtspRequest(const string &cmd, const string &url ,const std::initializer_list<string> &header);
+    void sendReceiverReport(bool overTcp,int iTrackIndex);
 private:
 	string _strUrl;
 	SdpAttr _sdpAttr;
 	vector<SdpTrack::Ptr> _aTrackInfo;
 	function<void(const Parser&)> _onHandshake;
-	Socket::Ptr _apUdpSock[2];
-	//rtsp鉴权相关
+    Socket::Ptr _apRtpSock[2]; //RTP端口,trackid idx 为数组下标
+    Socket::Ptr _apRtcpSock[2];//RTCP端口,trackid idx 为数组下标
+
+    //rtsp鉴权相关
 	string _rtspMd5Nonce;
 	string _rtspRealm;
 	//rtsp info
@@ -134,15 +147,17 @@ private:
 	Ticker _rtpTicker;
 	std::shared_ptr<Timer> _pPlayTimer;
 	std::shared_ptr<Timer> _pRtpTimer;
-	//心跳定时器
-	std::shared_ptr<Timer> _pBeatTimer;
-    
+
     //播放进度控制,单位毫秒
     uint32_t _iSeekTo = 0;
 
     //单位毫秒
 	uint32_t _aiFistStamp[2] = {0,0};
 	uint32_t _aiNowStamp[2] = {0,0};
+
+	//rtcp相关
+    RtcpCounter _aRtcpCnt[2]; //rtcp统计,trackid idx 为数组下标
+    Ticker _aRtcpTicker[2]; //rtcp发送时间,trackid idx 为数组下标
 };
 
 } /* namespace mediakit */

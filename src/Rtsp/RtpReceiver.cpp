@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -99,6 +99,15 @@ bool RtpReceiver::handleOneRtp(int iTrackidx,SdpTrack::Ptr &track, unsigned char
         rtppt.offset += ext;
     }
 
+    if(rtppt.length - rtppt.offset <= 0){
+        WarnL << "无有效负载的rtp包:" << rtppt.length << "<=" << (int)rtppt.offset;
+        return false;
+    }
+
+    if(uiLen > sizeof(rtppt.payload) - 4){
+        WarnL << "超长的rtp包:" << uiLen << ">" << sizeof(rtppt.payload) - 4;
+        return false;
+    }
     memcpy(rtppt.payload + 4, pucData, uiLen);
 
     /////////////////////////////////RTP排序逻辑///////////////////////////////////
@@ -107,11 +116,12 @@ bool RtpReceiver::handleOneRtp(int iTrackidx,SdpTrack::Ptr &track, unsigned char
         _aui32SeqOkCnt[iTrackidx] = 0;
         _abSortStarted[iTrackidx] = true;
 //        WarnL << "包乱序或丢包:" << iTrackidx <<" " << rtppt.sequence << " " << _aui16LastSeq[iTrackidx];
-        if(_aui16LastSeq[iTrackidx] > rtppt.sequence && _aui16LastSeq[iTrackidx] - rtppt.sequence > 0x7FFF){
+        if(_aui16LastSeq[iTrackidx] > rtppt.sequence && _aui16LastSeq[iTrackidx] - rtppt.sequence > 0xFF){
             //sequence回环，清空所有排序缓存
             while (_amapRtpSort[iTrackidx].size()) {
                 POP_HEAD(iTrackidx)
             }
+            ++_clcyeCount[iTrackidx];
         }
     }else{
         //正确序列的包
@@ -148,6 +158,7 @@ void RtpReceiver::clear() {
     CLEAR_ARR(_aui32SsrcErrorCnt)
     CLEAR_ARR(_aui32SeqOkCnt)
     CLEAR_ARR(_abSortStarted)
+    CLEAR_ARR(_clcyeCount)
 
     _amapRtpSort[0].clear();
     _amapRtpSort[1].clear();
@@ -156,5 +167,14 @@ void RtpReceiver::clear() {
 void RtpReceiver::setPoolSize(int size) {
     _pktPool.setSize(size);
 }
+
+int RtpReceiver::getJitterSize(int iTrackidx){
+    return _amapRtpSort[iTrackidx].size();
+}
+
+int RtpReceiver::getCycleCount(int iTrackidx){
+    return _clcyeCount[iTrackidx];
+}
+
 
 }//namespace mediakit

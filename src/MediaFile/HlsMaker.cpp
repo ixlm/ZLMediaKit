@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -86,10 +86,10 @@ void HlsMaker::delOldFile() {
     }
 }
 
-void HlsMaker::addNewFile(uint32_t timestamp) {
-    int stampInc = timestamp - _stamp_last;
+void HlsMaker::addNewFile(uint32_t) {
+    int stampInc = _ticker.elapsedTime();
     if (stampInc >= _seg_duration * 1000) {
-        _stamp_last = timestamp;
+        _ticker.resetTime();
         auto file_name = onOpenFile(_file_index);
         if (_file_index++ > 0) {
             _seg_dur_list.push_back(std::make_tuple(stampInc, _last_file_name));

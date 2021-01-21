@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -46,7 +46,7 @@ public:
     uint32_t timeStamp;
     uint16_t sequence;
     uint32_t ssrc;
-    uint8_t payload[1560];
+    uint8_t payload[1604];
     uint8_t offset;
     TrackType type;
 };

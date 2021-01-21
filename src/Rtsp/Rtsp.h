@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -111,7 +111,9 @@ class RtcpCounter {
 public:
 	uint32_t pktCnt = 0;
 	uint32_t octCount = 0;
+	//网络字节序
 	uint32_t timeStamp = 0;
+    uint32_t lastTimeStamp = 0;
 };
 
 string FindField(const char *buf, const char *start, const char *end, int bufSize = 0);

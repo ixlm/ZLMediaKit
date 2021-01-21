@@ -1,7 +1,7 @@
 ﻿/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -71,14 +71,14 @@ public:
 	typedef std::shared_ptr<RtpBroadCaster> Ptr;
 	typedef function<void()> onDetach;
 	virtual ~RtpBroadCaster();
-	static Ptr get(const string &strLocalIp,const string &strVhost,const string &strApp,const string &strStream);
+	static Ptr get(const EventPoller::Ptr &poller,const string &strLocalIp,const string &strVhost,const string &strApp,const string &strStream);
 	void setDetachCB(void *listener,const onDetach &cb);
 	uint16_t getPort(TrackType trackType);
 	string getIP();
 private:
 	static recursive_mutex g_mtx;
 	static unordered_map<string , weak_ptr<RtpBroadCaster> > g_mapBroadCaster;
-	static Ptr make(const string &strLocalIp,const string &strVhost,const string &strApp,const string &strStream);
+	static Ptr make(const EventPoller::Ptr &poller,const string &strLocalIp,const string &strVhost,const string &strApp,const string &strStream);
 
 	std::shared_ptr<uint32_t> _multiAddr;
 	recursive_mutex _mtx;
@@ -87,7 +87,7 @@ private:
 	Socket::Ptr _apUdpSock[2];
 	struct sockaddr_in _aPeerUdpAddr[2];
 
-	RtpBroadCaster(const string &strLocalIp,const string &strVhost,const string &strApp,const string &strStream);
+	RtpBroadCaster(const EventPoller::Ptr &poller,const string &strLocalIp,const string &strVhost,const string &strApp,const string &strStream);
 
 };
 

@@ -1,7 +1,7 @@
-﻿/*
+/*
  * MIT License
  *
- * Copyright (c) 2016 xiongziliang <771730766@qq.com>
+ * Copyright (c) 2016-2019 xiongziliang <771730766@qq.com>
  *
  * This file is part of ZLMediaKit(https://github.com/xiongziliang/ZLMediaKit).
  *
@@ -148,7 +148,7 @@ void RtspSession::onRecv(const Buffer::Ptr &pBuf) {
 void RtspSession::onWholeRtspPacket(Parser &parser) {
 	string strCmd = parser.Method(); //提取出请求命令字
 	_iCseq = atoi(parser["CSeq"].data());
-	if(_strContentBase.empty()){
+	if(_strContentBase.empty() && strCmd != "GET"){
 		_strContentBase = parser.Url();
 		_mediaInfo.parse(parser.FullUrl());
 	}
@@ -186,20 +186,25 @@ void RtspSession::onRtpPacket(const char *data, uint64_t len) {
 	if(!_pushSrc){
 		return;
 	}
-	if(len > 1600){
-		//没有大于MTU的包
-		return;
-	}
+
 	int trackIdx = -1;
 	uint8_t interleaved = data[1];
 	if(interleaved %2 == 0){
 		trackIdx = getTrackIndexByInterleaved(interleaved);
-	}
-	if (trackIdx != -1) {
-		handleOneRtp(trackIdx,_aTrackInfo[trackIdx],(unsigned char *)data + 4, len - 4);
+        if (trackIdx != -1) {
+            handleOneRtp(trackIdx,_aTrackInfo[trackIdx],(unsigned char *)data + 4, len - 4);
+        }
+	}else{
+        trackIdx = getTrackIndexByInterleaved(interleaved - 1);
+        if (trackIdx != -1) {
+            onRtcpPacket(trackIdx, _aTrackInfo[trackIdx], (unsigned char *) data + 4, len - 4);
+        }
 	}
 }
 
+void RtspSession::onRtcpPacket(int iTrackidx, SdpTrack::Ptr &track, unsigned char *pucData, unsigned int uiLen){
+
+}
 int64_t RtspSession::getContentLength(Parser &parser) {
 	if(parser.Method() == "POST"){
 		//http post请求的content数据部分是base64编码后的rtsp请求信令包
@@ -600,13 +605,24 @@ bool RtspSession::handleReq_Setup(const Parser &parser) {
 		_apRtcpSock[trackIdx] = pSockRtcp;
 		//设置客户端内网端口信息
 		string strClientPort = FindField(parser["Transport"].data(), "client_port=", NULL);
-		uint16_t ui16PeerPort = atoi( FindField(strClientPort.data(), NULL, "-").data());
-		struct sockaddr_in peerAddr;
+		uint16_t ui16RtpPort = atoi( FindField(strClientPort.data(), NULL, "-").data());
+        uint16_t ui16RtcpPort = atoi( FindField(strClientPort.data(), "-" , NULL).data());
+
+        struct sockaddr_in peerAddr;
+        //设置rtp发送目标地址
 		peerAddr.sin_family = AF_INET;
-		peerAddr.sin_port = htons(ui16PeerPort);
+		peerAddr.sin_port = htons(ui16RtpPort);
 		peerAddr.sin_addr.s_addr = inet_addr(get_peer_ip().data());
 		bzero(&(peerAddr.sin_zero), sizeof peerAddr.sin_zero);
 		pSockRtp->setSendPeerAddr((struct sockaddr *)(&peerAddr));
+
+		//设置rtcp发送目标地址
+        peerAddr.sin_family = AF_INET;
+        peerAddr.sin_port = htons(ui16RtcpPort);
+        peerAddr.sin_addr.s_addr = inet_addr(get_peer_ip().data());
+        bzero(&(peerAddr.sin_zero), sizeof peerAddr.sin_zero);
+        pSockRtcp->setSendPeerAddr((struct sockaddr *)(&peerAddr));
+
 		//尝试获取客户端nat映射地址
 		startListenPeerUdpData(trackIdx);
 		//InfoL << "分配端口:" << srv_port;
@@ -621,7 +637,7 @@ bool RtspSession::handleReq_Setup(const Parser &parser) {
 		break;
 	case Rtsp::RTP_MULTICAST: {
 		if(!_pBrdcaster){
-			_pBrdcaster = RtpBroadCaster::get(get_local_ip(),_mediaInfo._vhost, _mediaInfo._app, _mediaInfo._streamid);
+			_pBrdcaster = RtpBroadCaster::get(getPoller(),get_local_ip(),_mediaInfo._vhost, _mediaInfo._app, _mediaInfo._streamid);
 			if (!_pBrdcaster) {
 				send_NotAcceptable();
 				return false;
@@ -960,96 +976,52 @@ inline bool RtspSession::findStream() {
 }
 
 
-inline void RtspSession::sendRtpPacket(const RtpPacket::Ptr & pkt) {
-	//InfoL<<(int)pkt.Interleaved;
-	switch (_rtpType) {
-	case Rtsp::RTP_TCP: {
-        BufferRtp::Ptr buffer(new BufferRtp(pkt));
-		send(buffer);
-#ifdef RTSP_SEND_RTCP
-		int iTrackIndex = getTrackIndexByTrackId(pkt.interleaved / 2);
-		RtcpCounter &counter = _aRtcpCnt[iTrackIndex];
-		counter.pktCnt += 1;
-		counter.octCount += (pkt.length - 12);
-		auto &_ticker = _aRtcpTicker[iTrackIndex];
-		if (_ticker.elapsedTime() > 5 * 1000) {
-			//send rtcp every 5 second
-			_ticker.resetTime();
-			counter.timeStamp = pkt.timeStamp;
-			sendRTCP();
-		}
-#endif
-	}
-		break;
-	case Rtsp::RTP_UDP: {
-		int iTrackIndex = getTrackIndexByTrackType(pkt->type);
-		auto &pSock = _apRtpSock[iTrackIndex];
-		if (!pSock) {
-			shutdown();
-			return;
-		}
-		BufferRtp::Ptr buffer(new BufferRtp(pkt,4));
-        _ui64TotalBytes += buffer->size();
-        pSock->send(buffer);
-	}
-		break;
-	default:
-		break;
-	}
-}
-
 void RtspSession::onRtpSorted(const RtpPacket::Ptr &rtppt, int trackidx) {
 	_pushSrc->onWrite(rtppt, false);
 }
-inline void RtspSession::onRcvPeerUdpData(int iTrackIdx, const Buffer::Ptr &pBuf, const struct sockaddr& addr) {
+inline void RtspSession::onRcvPeerUdpData(int intervaled, const Buffer::Ptr &pBuf, const struct sockaddr& addr) {
 	//这是rtcp心跳包，说明播放器还存活
 	_ticker.resetTime();
 
-	if(iTrackIdx % 2 == 0){
-
+	if(intervaled % 2 == 0){
 		if(_pushSrc){
-			handleOneRtp(iTrackIdx / 2,_aTrackInfo[iTrackIdx / 2],( unsigned char *)pBuf->data(),pBuf->size());
+			handleOneRtp(intervaled / 2,_aTrackInfo[intervaled / 2],( unsigned char *)pBuf->data(),pBuf->size());
+		}else if(_udpSockConnected.count(intervaled)){
+            //这是rtp打洞包
+            _udpSockConnected.emplace(intervaled);
+            _apRtpSock[intervaled / 2]->setSendPeerAddr(&addr);
 		}
-
-		//这是rtp探测包
-		if(!_bGotAllPeerUdp){
-			//还没有获取完整的rtp探测包
-			if(SockUtil::in_same_lan(get_local_ip().data(),get_peer_ip().data())){
-				//在内网中，客户端上报的端口号是真实的，所以我们忽略udp打洞包
-				_bGotAllPeerUdp = true;
-				return;
-			}
-			//设置真实的客户端nat映射端口号
-			_apRtpSock[iTrackIdx / 2]->setSendPeerAddr(&addr);
-			_abGotPeerUdp[iTrackIdx / 2] = true;
-			_bGotAllPeerUdp = true;//先假设获取到完整的rtp探测包
-			for (unsigned int i = 0; i < _aTrackInfo.size(); i++) {
-				if (!_abGotPeerUdp[i]) {
-					//还有track没获取到rtp探测包
-					_bGotAllPeerUdp = false;
-					break;
-				}
-			}
-		}
-	}
+	}else{
+	    //rtcp包
+        if(_udpSockConnected.count(intervaled)){
+            _apRtcpSock[(intervaled - 1) / 2]->setSendPeerAddr(&addr);
+        }
+        onRtcpPacket((intervaled - 1) / 2, _aTrackInfo[(intervaled - 1) / 2], (unsigned char *) pBuf->data(),
+                     pBuf->size());
+    }
 }
 
 
 inline void RtspSession::startListenPeerUdpData(int trackIdx) {
 	weak_ptr<RtspSession> weakSelf = dynamic_pointer_cast<RtspSession>(shared_from_this());
-
-	auto onUdpData = [weakSelf](const Buffer::Ptr &pBuf, struct sockaddr *pPeerAddr,int iTrackIdx){
+    auto srcIP = inet_addr(get_peer_ip().data());
+	auto onUdpData = [weakSelf,srcIP](const Buffer::Ptr &pBuf, struct sockaddr *pPeerAddr,int intervaled){
+        if (((struct sockaddr_in *) pPeerAddr)->sin_addr.s_addr != srcIP) {
+            WarnL << ((intervaled % 2 == 0) ? "收到其他地址的rtp数据:" : "收到其他地址的rtcp数据:")
+            << inet_ntoa(((struct sockaddr_in *) pPeerAddr)->sin_addr);
+            return true;
+        }
 		auto strongSelf=weakSelf.lock();
 		if(!strongSelf) {
 			return false;
 		}
 		struct sockaddr addr=*pPeerAddr;
-		strongSelf->async([weakSelf,pBuf,addr,iTrackIdx]() {
+		strongSelf->async([weakSelf,pBuf,addr,intervaled]() {
 			auto strongSelf=weakSelf.lock();
 			if(!strongSelf) {
 				return;
 			}
-			strongSelf->onRcvPeerUdpData(iTrackIdx,pBuf,addr);
+			strongSelf->onRcvPeerUdpData(intervaled,pBuf,addr);
 		});
 		return true;
 	};
@@ -1058,19 +1030,19 @@ inline void RtspSession::startListenPeerUdpData(int trackIdx) {
 		case Rtsp::RTP_MULTICAST:{
 			//组播使用的共享rtcp端口
 			UDPServer::Instance().listenPeer(get_peer_ip().data(), this, [onUdpData](
-					int iTrackIdx, const Buffer::Ptr &pBuf, struct sockaddr *pPeerAddr) {
-				return onUdpData(pBuf,pPeerAddr,iTrackIdx);
+					int intervaled, const Buffer::Ptr &pBuf, struct sockaddr *pPeerAddr) {
+				return onUdpData(pBuf,pPeerAddr,intervaled);
 			});
 		}
 			break;
 		case Rtsp::RTP_UDP:{
-			auto setEvent = [&](Socket::Ptr &sock,int iTrackIdx){
+			auto setEvent = [&](Socket::Ptr &sock,int intervaled){
 				if(!sock){
-					WarnL << "udp端口为空:" << iTrackIdx;
+					WarnL << "udp端口为空:" << intervaled;
 					return;
 				}
-				sock->setOnRead([onUdpData,iTrackIdx](const Buffer::Ptr &pBuf, struct sockaddr *pPeerAddr){
-					onUdpData(pBuf,pPeerAddr,iTrackIdx);
+				sock->setOnRead([onUdpData,intervaled](const Buffer::Ptr &pBuf, struct sockaddr *pPeerAddr){
+					onUdpData(pBuf,pPeerAddr,intervaled);
 				});
 			};
 			setEvent(_apRtpSock[trackIdx], 2*trackIdx );
@@ -1193,65 +1165,107 @@ bool RtspSession::close() {
 	return true;
 }
 
-#ifdef RTSP_SEND_RTCP
-inline void RtspSession::sendRTCP() {
-	//DebugL;
-	uint8_t aui8Rtcp[60] = {0};
-	uint8_t *pui8Rtcp_SR = aui8Rtcp + 4, *pui8Rtcp_SDES = pui8Rtcp_SR + 28;
-	for (uint8_t i = 0; i < _uiTrackCnt; i++) {
-		auto &track = _aTrackInfo[i];
-		auto &counter = _aRtcpCnt[i];
 
-		aui8Rtcp[0] = '$';
-		aui8Rtcp[1] = track.trackId * 2 + 1;
-		aui8Rtcp[2] = 56 / 256;
-		aui8Rtcp[3] = 56 % 256;
+inline void RtspSession::sendRtpPacket(const RtpPacket::Ptr & pkt) {
+    //InfoL<<(int)pkt.Interleaved;
+    switch (_rtpType) {
+        case Rtsp::RTP_TCP: {
+            BufferRtp::Ptr buffer(new BufferRtp(pkt));
+            send(buffer);
+        }
+            break;
+        case Rtsp::RTP_UDP: {
+            int iTrackIndex = getTrackIndexByTrackType(pkt->type);
+            auto &pSock = _apRtpSock[iTrackIndex];
+            if (!pSock) {
+                shutdown();
+                return;
+            }
+            BufferRtp::Ptr buffer(new BufferRtp(pkt,4));
+            _ui64TotalBytes += buffer->size();
+            pSock->send(buffer);
+        }
+            break;
+        default:
+            break;
+    }
 
-		pui8Rtcp_SR[0] = 0x80;
-		pui8Rtcp_SR[1] = 0xC8;
-		pui8Rtcp_SR[2] = 0x00;
-		pui8Rtcp_SR[3] = 0x06;
-
-		uint32_t ssrc=htonl(track.ssrc);
-		memcpy(&pui8Rtcp_SR[4], &ssrc, 4);
-
-		uint64_t msw;
-		uint64_t lsw;
-		struct timeval tv;
-		gettimeofday(&tv, NULL);
-		msw = tv.tv_sec + 0x83AA7E80; /* 0x83AA7E80 is the number of seconds from 1900 to 1970 */
-		lsw = (uint32_t) ((double) tv.tv_usec * (double) (((uint64_t) 1) << 32) * 1.0e-6);
-
-		msw = htonl(msw);
-		memcpy(&pui8Rtcp_SR[8], &msw, 4);
-
-		lsw = htonl(lsw);
-		memcpy(&pui8Rtcp_SR[12], &lsw, 4);
-
-		uint32_t rtpStamp = htonl(counter.timeStamp);
-		memcpy(&pui8Rtcp_SR[16], &rtpStamp, 4);
-
-		uint32_t pktCnt = htonl(counter.pktCnt);
-		memcpy(&pui8Rtcp_SR[20], &pktCnt, 4);
-
-		uint32_t octCount = htonl(counter.octCount);
-		memcpy(&pui8Rtcp_SR[24], &octCount, 4);
-
-		pui8Rtcp_SDES[0] = 0x81;
-		pui8Rtcp_SDES[1] = 0xCA;
-		pui8Rtcp_SDES[2] = 0x00;
-		pui8Rtcp_SDES[3] = 0x06;
-
-		memcpy(&pui8Rtcp_SDES[4], &ssrc, 4);
-
-		pui8Rtcp_SDES[8] = 0x01;
-		pui8Rtcp_SDES[9] = 0x0f;
-		memcpy(&pui8Rtcp_SDES[10], "_ZL_RtspServer_", 15);
-		pui8Rtcp_SDES[25] = 0x00;
-		send((char *) aui8Rtcp, 60);
-	}
+    int iTrackIndex = getTrackIndexByInterleaved(pkt->interleaved);
+    if(iTrackIndex == -1){
+        return;
+    }
+    RtcpCounter &counter = _aRtcpCnt[iTrackIndex];
+    counter.pktCnt += 1;
+    counter.octCount += (pkt->length - pkt->offset);
+    auto &ticker = _aRtcpTicker[iTrackIndex];
+    if (ticker.elapsedTime() > 5 * 1000) {
+        //send rtcp every 5 second
+        ticker.resetTime();
+        //直接保存网络字节序
+        memcpy(&counter.timeStamp, pkt->payload + 8 , 4);
+        sendSenderReport(_rtpType == Rtsp::RTP_TCP,iTrackIndex);
+    }
 }
-#endif
+
+inline void RtspSession::sendSenderReport(bool overTcp,int iTrackIndex) {
+    static const char s_cname[] = "ZLMediaKitRtsp";
+    uint8_t aui8Rtcp[4 + 28 + 10 + sizeof(s_cname) + 1] = {0};
+    uint8_t *pui8Rtcp_SR = aui8Rtcp + 4, *pui8Rtcp_SDES = pui8Rtcp_SR + 28;
+    auto &track = _aTrackInfo[iTrackIndex];
+    auto &counter = _aRtcpCnt[iTrackIndex];
+
+    aui8Rtcp[0] = '$';
+    aui8Rtcp[1] = track->_interleaved + 1;
+    aui8Rtcp[2] = (sizeof(aui8Rtcp) - 4) >> 8;
+    aui8Rtcp[3] = (sizeof(aui8Rtcp) - 4) & 0xFF;
+
+    pui8Rtcp_SR[0] = 0x80;
+    pui8Rtcp_SR[1] = 0xC8;
+    pui8Rtcp_SR[2] = 0x00;
+    pui8Rtcp_SR[3] = 0x06;
+
+    uint32_t ssrc=htonl(track->_ssrc);
+    memcpy(&pui8Rtcp_SR[4], &ssrc, 4);
+
+    uint64_t msw;
+    uint64_t lsw;
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    msw = tv.tv_sec + 0x83AA7E80; /* 0x83AA7E80 is the number of seconds from 1900 to 1970 */
+    lsw = (uint32_t) ((double) tv.tv_usec * (double) (((uint64_t) 1) << 32) * 1.0e-6);
+
+    msw = htonl(msw);
+    memcpy(&pui8Rtcp_SR[8], &msw, 4);
+
+    lsw = htonl(lsw);
+    memcpy(&pui8Rtcp_SR[12], &lsw, 4);
+    //直接使用网络字节序
+    memcpy(&pui8Rtcp_SR[16], &counter.timeStamp, 4);
+
+    uint32_t pktCnt = htonl(counter.pktCnt);
+    memcpy(&pui8Rtcp_SR[20], &pktCnt, 4);
+
+    uint32_t octCount = htonl(counter.octCount);
+    memcpy(&pui8Rtcp_SR[24], &octCount, 4);
+
+    pui8Rtcp_SDES[0] = 0x81;
+    pui8Rtcp_SDES[1] = 0xCA;
+    pui8Rtcp_SDES[2] = 0x00;
+    pui8Rtcp_SDES[3] = 0x06;
+
+    memcpy(&pui8Rtcp_SDES[4], &ssrc, 4);
+
+    pui8Rtcp_SDES[8] = 0x01;
+    pui8Rtcp_SDES[9] = 0x0f;
+    memcpy(&pui8Rtcp_SDES[10], s_cname, sizeof(s_cname));
+    pui8Rtcp_SDES[10 + sizeof(s_cname)] = 0x00;
+
+    if(overTcp){
+        send(obtainBuffer((char *) aui8Rtcp, sizeof(aui8Rtcp)));
+    }else {
+        _apRtcpSock[iTrackIndex]->send((char *) aui8Rtcp + 4, sizeof(aui8Rtcp) - 4);
+    }
+}
 
 }
 /* namespace mediakit */
